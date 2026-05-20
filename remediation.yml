@@ -1,0 +1,25 @@
+---
+- name: Remédiation WAF (SQL Injection) via .htaccess
+  hosts: all
+  become: yes  # Permet d'exécuter avec les droits root/sudo
+  
+  tasks:
+    - name: "S'assurer que le fichier .htaccess existe à la racine du serveur web"
+      ansible.builtin.file:
+        path: /var/www/html/.htaccess
+        state: touch
+        mode: '0644'
+        owner: www-data
+        group: www-data
+
+    - name: "Insérer la règle de blocage SQL Injection dans le .htaccess"
+      ansible.builtin.blockinfile:
+        path: /var/www/html/.htaccess
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - SOAR REMEDIATION SQLi"
+        block: |
+          <IfModule mod_rewrite.c>
+          RewriteEngine On
+          # Bloquer les tentatives d'injection SQL basiques (UNION SELECT, etc.)
+          RewriteCond %{QUERY_STRING} (?i)(UNION.*SELECT|SELECT.*FROM|INSERT.*INTO|UPDATE.*SET|DELETE.*FROM|DROP.*TABLE) [NC]
+          RewriteRule ^(.*)$ - [F,L]
+          </IfModule>
