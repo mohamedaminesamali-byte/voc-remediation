@@ -3,33 +3,32 @@
   hosts: all
   become: yes
 
- tasks:
-    - name: "Désactiver la fuite de version Nginx (server_tokens) dans nginx.conf"
+  tasks:
+    - name: Désactiver server_tokens en remplaçant la ligne dans nginx.conf
       ansible.builtin.lineinfile:
         path: /etc/nginx/nginx.conf
-        # Cherche la ligne server_tokens (qu'elle soit commentée avec # ou non)
-        regexp: '^\s*#?\s*server_tokens\s+.*'
-        # La remplace par sa version désactivée
+        regexp: '^\s*server_tokens\s+.*'
         line: '    server_tokens off;'
         insertafter: 'http \{'
+        state: present
 
-    - name: "Créer un fichier de règles de sécurité (Headers) Nginx"
-      ansible.builtin.blockinfile:
-        path: /etc/nginx/conf.d/security.conf
-        create: yes
-        marker: "# {mark} ANSIBLE MANAGED BLOCK - SECURITY HEADERS"
-        block: |
-          # X-Frame-Options pour éviter le Clickjacking
+    - name: Créer le fichier de headers de sécurité Nginx
+      ansible.builtin.copy:
+        dest: /etc/nginx/conf.d/security.conf
+        content: |
           add_header X-Frame-Options "SAMEORIGIN" always;
-          add_header X-Content-Type-Options "nosniff" always;
+          add_header Content-Security-Policy "default-src 'self'; frame-ancestors 'self';" always;
           add_header X-XSS-Protection "1; mode=block" always;
-          # ATTENTION : Ne pas mettre server_tokens ici pour éviter le doublon !
+          add_header X-Content-Type-Options "nosniff" always;
+        owner: root
+        group: root
+        mode: '0644'
 
-    - name: "Vérifier la syntaxe de la configuration Nginx"
+    - name: Vérifier la syntaxe de la configuration Nginx
       ansible.builtin.command: nginx -t
       changed_when: false
 
-    - name: "Recharger Nginx pour appliquer les patchs"
-      ansible.builtin.systemd:
+    - name: Recharger Nginx pour appliquer les changements
+      ansible.builtin.service:
         name: nginx
         state: reloaded
