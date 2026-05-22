@@ -1,0 +1,33 @@
+---
+- name: Remédiation des failles système (OpenVAS) sur Metasploitable
+  hosts: all
+  become: yes
+  
+  tasks:
+    - name: "Faille 1: Désactiver Telnet (Cleartext communication)"
+      service:
+        name: openbsd-inetd # Le service qui gère souvent telnet sur les vieux Ubuntu
+        state: stopped
+        enabled: no
+      ignore_errors: yes # On ignore l'erreur si le service s'appelle autrement
+
+    - name: "Faille 2: Désactiver vsftpd (Vulnérabilité Backdoor / Anonymous FTP)"
+      service:
+        name: vsftpd
+        state: stopped
+        enabled: no
+      ignore_errors: yes
+
+    - name: "Faille 3: Sécuriser SSH (Interdire la connexion Root)"
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^#?PermitRootLogin'
+        line: 'PermitRootLogin no'
+        state: present
+      notify: "Redémarrer SSH"
+
+  handlers:
+    - name: "Redémarrer SSH"
+      service:
+        name: ssh
+        state: restarted
