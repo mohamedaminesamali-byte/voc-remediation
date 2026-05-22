@@ -3,36 +3,33 @@
   hosts: all
   become: yes
 
-  tasks:
-    - name: "Créer un fichier de règles de sécurité Nginx"
+ tasks:
+    - name: "Désactiver la fuite de version Nginx (server_tokens) dans nginx.conf"
+      ansible.builtin.lineinfile:
+        path: /etc/nginx/nginx.conf
+        # Cherche la ligne server_tokens (qu'elle soit commentée avec # ou non)
+        regexp: '^\s*#?\s*server_tokens\s+.*'
+        # La remplace par sa version désactivée
+        line: '    server_tokens off;'
+        insertafter: 'http \{'
+
+    - name: "Créer un fichier de règles de sécurité (Headers) Nginx"
       ansible.builtin.blockinfile:
         path: /etc/nginx/conf.d/security.conf
         create: yes
-        mode: '0644'
-        marker: "# {mark} ANSIBLE MANAGED BLOCK - SOAR REMEDIATION NGINX"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - SECURITY HEADERS"
         block: |
-          # 1. Masquer la version exacte du serveur (Server Leaks Version Information)
-          server_tokens off;
-          
-          # 2. Protection contre le Clickjacking (Missing Anti-Clickjacking Header)
+          # X-Frame-Options pour éviter le Clickjacking
           add_header X-Frame-Options "SAMEORIGIN" always;
-          
-          # 3. Politique de sécurité du contenu de base (Content-Security-Policy)
-          add_header Content-Security-Policy "frame-ancestors 'self';" always;
-          
-          # 4. Protection basique contre le XSS
-          add_header X-XSS-Protection "1; mode=block" always;
-          
-          # 5. Empêcher l'inférence du type MIME (Sniffing)
           add_header X-Content-Type-Options "nosniff" always;
+          add_header X-XSS-Protection "1; mode=block" always;
+          # ATTENTION : Ne pas mettre server_tokens ici pour éviter le doublon !
 
     - name: "Vérifier la syntaxe de la configuration Nginx"
       ansible.builtin.command: nginx -t
-      register: nginx_test
       changed_when: false
 
-    - name: "Redémarrer Nginx pour appliquer les modifications"
-      ansible.builtin.service:
+    - name: "Recharger Nginx pour appliquer les patchs"
+      ansible.builtin.systemd:
         name: nginx
-        state: restarted
-      when: nginx_test.rc == 0
+        state: reloaded
