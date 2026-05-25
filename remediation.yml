@@ -1,5 +1,5 @@
 ---
-- name: Remédiation WAF (SQL Injection) via .htaccess
+- name: Remédiation Globale WAF et En-têtes de Sécurité via .htaccess
   hosts: all
   become: yes  # Permet d'exécuter avec les droits root/sudo
   
@@ -12,14 +12,50 @@
         owner: www-data
         group: www-data
 
-    - name: "Insérer la règle de blocage SQL Injection dans le .htaccess"
+    - name: "S'assurer que les modules headers et rewrite sont actifs sur Apache"
+      ansible.builtin.command: a2enmod headers rewrite
+      notify: Restart Apache
+
+    - name: "Insérer les règles de sécurité WAF et Headers dans le .htaccess"
       ansible.builtin.blockinfile:
         path: /var/www/html/.htaccess
-        marker: "# {mark} ANSIBLE MANAGED BLOCK - SOAR REMEDIATION SQLi"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - SOAR AUTO-REMEDIATION"
         block: |
-          <IfModule mod_rewrite.c>
-          RewriteEngine On
-          # Bloquer les tentatives d'injection SQL basiques (UNION SELECT, etc.)
-          RewriteCond %{QUERY_STRING} (?i)(UNION.*SELECT|SELECT.*FROM|INSERT.*INTO|UPDATE.*SET|DELETE.*FROM|DROP.*TABLE) [NC]
-          RewriteRule ^(.*)$ - [F,L]
+          # ---------------------------------------------------
+          # 1. REMEDIATION : EN-TETES DE SECURITE (HEADERS)
+          # ---------------------------------------------------
+          <IfModule mod_headers.c>
+              # Anti Clickjacking
+              Header always set X-Frame-Options "SAMEORIGIN"
+              
+              # Anti MIME-Sniffing
+              Header always set X-Content-Type-Options "nosniff"
+              
+              # Content Security Policy (assoupli pour garder l'arrière-plan et le CSS)
+              Header set Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:;"
           </IfModule>
+
+          # ---------------------------------------------------
+          # 2. REMEDIATION : VIRTUAL PATCHING (WAF)
+          # ---------------------------------------------------
+          <IfModule mod_rewrite.c>
+              RewriteEngine On
+              
+              # Règle 1 : Bloquer les injections SQL (SQLi)
+              RewriteCond %{QUERY_STRING} (?i)(UNION.*SELECT|SELECT.*FROM|INSERT.*INTO|UPDATE.*SET|DELETE.*FROM|DROP.*TABLE|--|\#) [NC,OR]
+              
+              # Règle 2 : Bloquer le Cross-Site Scripting (XSS) au lieu de bloquer toute la page
+              RewriteCond %{QUERY_STRING} (?i)(<script.*>|javascript:|onerror=|onload=|alert\() [NC,OR]
+              
+              # Règle 3 : Bloquer les inclusions de fichiers (LFI / Path Traversal)
+              RewriteCond %{QUERY_STRING} (?i)(\.\./|\.\.\\|/etc/passwd) [NC]
+              
+              # Action : Si une des règles ci-dessus 'match', on renvoie un code 403 Forbidden
+              RewriteRule ^(.*)$ - [F,L]
+          </IfModule>
+
+  handlers:
+    - name: Restart Apache
+      ansible.builtin.service:
+        name: apache2
+        state: restarted
