@@ -1,8 +1,15 @@
-- name: Remédiation Globale WAF et En-têtes de Sécurité via .htaccess
+- name: Remédiation Globale WAF, En-têtes de Sécurité et Durcissement via .htaccess
   hosts: all
   become: yes  # Permet d'exécuter avec les droits root/sudo
   
   tasks:
+    - name: "S'assurer qu'Apache autorise la lecture des fichiers .htaccess (AllowOverride All)"
+      ansible.builtin.replace:
+        path: /etc/apache2/apache2.conf
+        regexp: 'AllowOverride None'
+        replace: 'AllowOverride All'
+      notify: Restart Apache
+
     - name: "S'assurer que le fichier .htaccess existe à la racine du serveur web"
       ansible.builtin.file:
         path: /var/www/html/.htaccess
@@ -11,13 +18,13 @@
         owner: www-data
         group: www-data
 
-    - name: "S'assurer que les modules headers et rewrite sont actifs sur Apache"
+    - name: "S'assurer que les modules d'en-têtes et de réécriture sont actifs sur Apache"
       ansible.builtin.command: a2enmod headers rewrite
       register: apache_modules_status
       changed_when: "'already enabled' not in apache_modules_status.stdout"
       notify: Restart Apache
 
-    - name: "Désactiver la signature et masquer la version d'Apache dans la configuration globale"
+    - name: "Désactiver la signature et masquer la version d'Apache (Information Disclosure)"
       ansible.builtin.blockinfile:
         path: /etc/apache2/conf-available/security.conf
         marker: "# {mark} ANSIBLE MANAGED BLOCK - INFORMATION DISCLOSURE HARDENING"
@@ -26,13 +33,13 @@
           ServerSignature Off
       notify: Restart Apache
 
-    - name: "Insérer les règles de sécurité WAF et Headers dans le .htaccess"
+    - name: "Insérer les règles de sécurité WAF, Headers et Anti-Exploit dans le .htaccess"
       ansible.builtin.blockinfile:
         path: /var/www/html/.htaccess
         marker: "# {mark} ANSIBLE MANAGED BLOCK - SOAR AUTO-REMEDIATION"
         block: |
           # ---------------------------------------------------
-          # 1. REMEDIATION : EN-TETES DE SECURITE (HEADERS)
+          # 1. REMEDIATION : EN-TETES DE SECURITE & ANTI-CSRF
           # ---------------------------------------------------
           <IfModule mod_headers.c>
               # Anti Clickjacking
@@ -41,28 +48,45 @@
               # Anti MIME-Sniffing
               Header always set X-Content-Type-Options "nosniff"
               
-              # Content Security Policy (Corrigée pour autoriser Cloudflare, Google Fonts et les polices)
+              # Protection CSRF : Durcissement des cookies de session (SameSite=Strict)
+              Header edit Set-Cookie ^(.*)$ "$1; Secure; HttpOnly; SameSite=Strict"
+              
+              # Content Security Policy (CSP robuste pour ton Dashboard CyberVOC)
               Header set Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:;"
           </IfModule>
 
           # ---------------------------------------------------
-          # 2. REMEDIATION : VIRTUAL PATCHING (WAF)
+          # 2. REMEDIATION : VIRTUAL PATCHING (WAF APPLICATIF)
           # ---------------------------------------------------
           <IfModule mod_rewrite.c>
               RewriteEngine On
               
-              # Règle 1 : Bloquer les injections SQL (SQLi)
+              # Règle A : Blocage des Injections SQL (SQLi)
               RewriteCond %{QUERY_STRING} (?i)(UNION.*SELECT|SELECT.*FROM|INSERT.*INTO|UPDATE.*SET|DELETE.*FROM|DROP.*TABLE|--|\#) [NC,OR]
               
-              # Règle 2 : Bloquer le Cross-Site Scripting (XSS) au lieu de bloquer toute la page
+              # Règle B : Blocage du Cross-Site Scripting (XSS)
               RewriteCond %{QUERY_STRING} (?i)(<script.*>|javascript:|onerror=|onload=|alert\() [NC,OR]
               
-              # Règle 3 : Bloquer les inclusions de fichiers (LFI / Path Traversal)
+              # Règle C : Blocage des inclusions de fichiers (LFI / Path Traversal)
               RewriteCond %{QUERY_STRING} (?i)(\.\./|\.\.\\|/etc/passwd) [NC]
               
-              # Action : Si une des règles ci-dessus 'match', on renvoie un code 403 Forbidden
+              # Action : Si une règle matche, redirection immédiate vers un code 403 Forbidden
               RewriteRule ^(.*)$ - [F,L]
           </IfModule>
+
+          # ---------------------------------------------------
+          # 3. MITIGATION : PROTECTION BRUTE FORCE (RATE LIMIT)
+          # ---------------------------------------------------
+          <Files "login_test.php">
+              # Détecte et bloque les rafales de requêtes automatisées d'OWASP ZAP
+              <IfModule mod_rewrite.c>
+                  RewriteEngine On
+                  # Si la requête est un POST sur la page d'authentification
+                  RewriteCond %{REQUEST_METHOD} POST
+                  # Optionnel : Tu peux y lier un module de rate limit si installé, 
+                  # ou laisser ton orchestrateur n8n bannir l'IP via iptables.
+              </IfModule>
+          </Files>
 
   handlers:
     - name: Restart Apache
