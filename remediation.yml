@@ -1,4 +1,3 @@
----
 - name: Remédiation Globale WAF et En-têtes de Sécurité via .htaccess
   hosts: all
   become: yes  # Permet d'exécuter avec les droits root/sudo
@@ -14,6 +13,8 @@
 
     - name: "S'assurer que les modules headers et rewrite sont actifs sur Apache"
       ansible.builtin.command: a2enmod headers rewrite
+      register: apache_modules_status
+      changed_when: "'already enabled' not in apache_modules_status.stdout"
       notify: Restart Apache
 
     - name: "Insérer les règles de sécurité WAF et Headers dans le .htaccess"
@@ -31,8 +32,8 @@
               # Anti MIME-Sniffing
               Header always set X-Content-Type-Options "nosniff"
               
-              # Content Security Policy (assoupli pour garder l'arrière-plan et le CSS)
-              Header set Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:;"
+              # Content Security Policy (Corrigée pour autoriser Cloudflare, Google Fonts et les polices)
+              Header set Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:;"
           </IfModule>
 
           # ---------------------------------------------------
