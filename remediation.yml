@@ -17,6 +17,15 @@
       changed_when: "'already enabled' not in apache_modules_status.stdout"
       notify: Restart Apache
 
+    - name: "Désactiver la signature et masquer la version d'Apache dans la configuration globale"
+      ansible.builtin.blockinfile:
+        path: /etc/apache2/conf-available/security.conf
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - INFORMATION DISCLOSURE HARDENING"
+        block: |
+          ServerTokens Prod
+          ServerSignature Off
+      notify: Restart Apache
+
     - name: "Insérer les règles de sécurité WAF et Headers dans le .htaccess"
       ansible.builtin.blockinfile:
         path: /var/www/html/.htaccess
